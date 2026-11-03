@@ -1,0 +1,47 @@
+name: merge queue probe
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the event SHA
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: >-
+            ${{
+              github.event.merge_group.head_sha ||
+              github.event.pull_request.head.sha ||
+              github.sha
+            }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record the event head and tree
+        run: |
+          HEAD_SHA="${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha || github.sha }}"
+          {
+            echo "event=${{ github.event_name }}"
+            echo "head_sha=$HEAD_SHA"
+            echo "merge_group_head_sha=${{ github.event.merge_group.head_sha }}"
+            echo "merge_group_base_sha=${{ github.event.merge_group.base_sha }}"
+            echo "head_tree=$(git rev-parse HEAD^{tree})"
+            echo "event_head_tree_id=${{ github.event.merge_group.head_commit.tree_id }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post the probe check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          HEAD_SHA="${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha || github.sha }}"
+          jq -n --arg sha "$HEAD_SHA" \
+            '{name:"merge-queue-probe",head_sha:$sha,status:"completed",conclusion:"success",output:{title:"merge queue probe",summary:"event head recorded"}}' \
+            | gh api "repos/$REPO/check-runs" --method POST --input -
